@@ -1,0 +1,25 @@
+# Build directories
+build/
+cmake-build-*/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake.in
+
+# Compiled objects / binaries
+*.o
+*.a
+*.so
+*.out
+/sysinfo
+
+# Automatically installed ClamAV engine (library + signature database)
+third_party/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
