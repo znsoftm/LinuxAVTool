@@ -1,3 +1,5 @@
+[English](README_EN.md) | [简体中文](README.md)
+
 # sysinfo
 
 Linux 系统信息检测工具（C++11）。采集语言/区域设置、内存、磁盘信息，并通过
