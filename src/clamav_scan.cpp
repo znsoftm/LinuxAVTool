@@ -652,11 +652,15 @@ void scanFileWithLibrary(struct cl_engine* engine, const std::string& path,
     }
 }
 
-// Walk `path` and scan every regular file. Symbolic links are not followed, so
-// a link loop cannot make the walk diverge. Sets result.error on a timeout.
+// Walk `path` and scan every regular file. The walk starts at `path`, which the
+// caller has already resolved: when it is a symlink to a file or directory the
+// link is followed once, because the user asked for that target explicitly.
+// Symbolic links found *inside* the tree are never followed, so a link loop
+// cannot make the walk diverge. Sets result.error on a timeout.
 void walkAndScanWithLibrary(struct cl_engine* engine, const std::string& path,
                             const ScanOptions& options, ScanResult& result,
-                            const std::chrono::steady_clock::time_point& deadline) {
+                            const std::chrono::steady_clock::time_point& deadline,
+                            bool isRoot) {
     if (!result.error.empty()) {
         return;  // a previous entry aborted the scan
     }
@@ -666,21 +670,25 @@ void walkAndScanWithLibrary(struct cl_engine* engine, const std::string& path,
     }
 
     struct stat info;
-    if (lstat(path.c_str(), &info) != 0) {
+    const int statStatus =
+        isRoot ? stat(path.c_str(), &info) : lstat(path.c_str(), &info);
+    if (statStatus != 0) {
         return;
     }
-    if (S_ISLNK(info.st_mode)) {
+    if (!isRoot && S_ISLNK(info.st_mode)) {
         return;
     }
     if (S_ISDIR(info.st_mode)) {
-        result.scannedDirectories += 1;
         if (!options.recursive) {
+            result.scannedDirectories += 1;
             return;
         }
         DIR* dir = opendir(path.c_str());
         if (dir == NULL) {
-            return;
+            return;  // unreadable: not counted, so a fully unreadable root
+                     // cannot be mistaken for a clean scan
         }
+        result.scannedDirectories += 1;
         std::vector<std::string> children;
         struct dirent* entry = NULL;
         while ((entry = readdir(dir)) != NULL) {
@@ -693,7 +701,7 @@ void walkAndScanWithLibrary(struct cl_engine* engine, const std::string& path,
         closedir(dir);
         for (std::size_t i = 0; i < children.size(); ++i) {
             walkAndScanWithLibrary(engine, path + "/" + children[i], options,
-                                   result, deadline);
+                                   result, deadline, false);
             if (!result.error.empty()) {
                 return;
             }
@@ -732,10 +740,20 @@ ScanResult scanPathWithLibrary(const ScanEngine& engine,
                                       : kDefaultTimeoutSeconds;
     const std::chrono::steady_clock::time_point deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
-    walkAndScanWithLibrary(clEngine, target, options, result, deadline);
+    walkAndScanWithLibrary(clEngine, target, options, result, deadline, true);
 
     if (!result.error.empty()) {
         return result;  // valid stays false: the scan did not finish
+    }
+
+    // A walk that visited no file and no directory means the target could not
+    // be traversed at all (unreadable directory, special file, broken link).
+    // Reporting that as "clean" would be a silent false negative, so fail
+    // loudly instead of claiming the target is free of threats.
+    if (result.scannedFiles == 0 && result.scannedDirectories == 0) {
+        result.error = "nothing was scanned: " + target +
+                       " yielded no readable file or directory";
+        return result;
     }
 
     if (result.infectedFiles == 0 && !result.findings.empty()) {

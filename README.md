@@ -63,7 +63,11 @@ scripts/install_clamav.sh --force          # 强制重装
 * `cl_init` / `cl_engine_new` / `cl_load(CL_DB_STDOPT)` / `cl_engine_compile`
   在首次使用时建立引擎，随后所有扫描复用同一个已编译引擎（病毒库只加载一次）。
 * 每个文件用 `cl_scanfile_ex` 扫描，按 `cl_verdict_t` 判定；
-  目录树自行递归遍历，不跟随符号链接。
+  目录树自行递归遍历。显式指定的扫描目标若是符号链接会被跟随一次（例如
+  `/lib` → `usr/lib`、`/bin` → `usr/bin`），而目录树内部的符号链接一律不跟随，
+  因此链接环路不会让遍历发散。
+* 遍历结束时若一个文件和一个目录都没有访问到（目标不可读、是特殊文件或链接
+  失效），扫描按失败上报而不是报告“未发现病毒”，避免把没扫到东西当成干净。
 * 引擎与病毒库版本来自 `cl_retver()`、`cl_engine_get_num(CL_ENGINE_DB_VERSION /
   CL_ENGINE_DB_TIME)`，签名总数来自 `cl_load` 的输出。
 
